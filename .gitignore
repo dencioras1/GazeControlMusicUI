@@ -1,0 +1,28 @@
+# Node dependencies
+node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Environment (e.g. PORT override)
+.env
+.env.*
+
+# Arduino build output
+arduino/**/build/
+*.hex
+*.elf
+*.bin
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
