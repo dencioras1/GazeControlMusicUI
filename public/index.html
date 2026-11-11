@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arduino Serial Sender</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; background: #f6f6f8; color: #222; }
+    h1 { font-size: 1.4rem; }
+    fieldset { border: 1px solid #ccc; border-radius: 8px; margin-bottom: 1rem; background: #fff; }
+    .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+    select, input, button { font: inherit; padding: .45rem .6rem; border-radius: 6px; border: 1px solid #bbb; }
+    #message { flex: 1; min-width: 0; }
+    button { background: #2563eb; color: #fff; border-color: #2563eb; cursor: pointer; }
+    button.secondary { background: #fff; color: #2563eb; }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { margin: .5rem 0 0; font-size: .9rem; }
+    #log { background: #111; color: #9f9; height: 220px; overflow-y: auto; padding: .5rem; border-radius: 6px; font: 13px monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Arduino Serial Sender</h1>
+
+  <fieldset>
+    <legend>Connection</legend>
+    <div class="row">
+      <select id="ports"></select>
+      <button class="secondary" id="refresh">Refresh</button>
+      <select id="baud">
+        <option>9600</option><option>19200</option><option>38400</option>
+        <option>57600</option><option selected>115200</option>
+      </select>
+      <button id="connect">Connect</button>
+      <button class="secondary" id="disconnect">Disconnect</button>
+    </div>
+    <p id="status">Not connected</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Send</legend>
+    <form id="sendForm" class="row">
+      <input id="message" type="text" placeholder="Type a message…" autocomplete="off" />
+      <button type="submit" id="send">Send</button>
+    </form>
+  </fieldset>
+
+  <fieldset>
+    <legend>Serial log</legend>
+    <div id="log"></div>
+  </fieldset>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let lastLogTime = 0;
+
+    async function api(path, body) {
+      const res = await fetch(path, body === undefined ? {} : {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function setStatus(text, ok) {
+      $('status').textContent = text;
+      $('status').style.color = ok ? 'green' : '#b00';
+    }
+
+    async function loadPorts() {
+      const { ports, open } = await api('/api/ports');
+      $('ports').innerHTML = ports.length
+        ? ports.map((p) => `<option value="${p.path}">${p.path}${p.manufacturer ? ' – ' + p.manufacturer : ''}</option>`).join('')
+        : '<option value="">No ports found</option>';
+      if (open) { $('ports').value = open; setStatus(`Connected to ${open}`, true); }
+    }
+
+    $('refresh').onclick = () => loadPorts().catch((e) => setStatus(e.message));
+
+    $('connect').onclick = async () => {
+      try {
+        const { path } = await api('/api/connect', { path: $('ports').value, baudRate: $('baud').value });
+        setStatus(`Connected to ${path}`, true);
+      } catch (e) { setStatus(e.message); }
+    };
+
+    $('disconnect').onclick = async () => {
+      try { await api('/api/disconnect', {}); setStatus('Not connected'); }
+      catch (e) { setStatus(e.message); }
+    };
+
+    $('sendForm').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const message = $('message').value;
+      if (!message) return;
+      try { await api('/api/send', { message }); $('message').value = ''; $('message').focus(); }
+      catch (e) { setStatus(e.message); }
+    };
+
+    async function pollLog() {
+      try {
+        const lines = await api(`/api/log?since=${lastLogTime}`);
+        for (const { time, line } of lines) {
+          $('log').textContent += line + '\n';
+          lastLogTime = time;
+        }
+        if (lines.length) $('log').scrollTop = $('log').scrollHeight;
+      } catch {}
+    }
+
+    loadPorts().catch((e) => setStatus(e.message));
+    setInterval(pollLog, 500);
+  </script>
+</body>
+</html>

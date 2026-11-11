@@ -1,0 +1,14 @@
+{
+  "name": "gaze-control-music-ui",
+  "version": "0.1.0",
+  "description": "Web interface that sends text to an Arduino over USB serial",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "serialport": "^12.0.0"
+  }
+}
