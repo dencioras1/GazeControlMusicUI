@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebGazer Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: system-ui, sans-serif; background: #f6f6f8; color: #222; overflow: hidden; }
+    button, select, input { font: inherit; }
+    button { padding: .4rem .6rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; color: #fff; cursor: pointer; }
+    button.secondary { background: #fff; color: #2563eb; }
+    button:disabled { opacity: .5; cursor: default; }
+    select { padding: .3rem; border-radius: 6px; border: 1px solid #bbb; }
+
+    /* Dwell grid fills the page (minus the side panel) */
+    #grid { position: fixed; inset: 0 340px 0 0; display: grid; gap: 12px; padding: 12px; }
+    .tile { border-radius: 12px; background: #fff; border: 2px solid #ddd; display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; color: #888; position: relative; overflow: hidden; user-select: none; }
+    .tile .fill { position: absolute; left: 0; bottom: 0; width: 100%; height: 0; background: #bfdbfe; z-index: 0; }
+    .tile span { position: relative; z-index: 1; }
+    .tile.gazed { border-color: #2563eb; color: #2563eb; }
+    .tile.selected { background: #22c55e; color: #fff; transition: background .1s; }
+
+    /* Side panel */
+    #panel { position: fixed; top: 0; right: 0; width: 340px; height: 100%; overflow-y: auto; background: #fff; border-left: 1px solid #ddd;
+             padding: .75rem 1rem; z-index: 100000; font-size: .9rem; }
+    #panel h1 { font-size: 1.15rem; margin: .25rem 0 .5rem; }
+    #panel h2 { font-size: .95rem; margin: 1rem 0 .4rem; border-bottom: 1px solid #eee; padding-bottom: .2rem; }
+    .row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-bottom: .4rem; }
+    label.check { display: flex; gap: .4rem; align-items: center; margin-bottom: .25rem; }
+    #status { font-weight: 600; }
+    .mono { font-family: monospace; }
+    #log { background: #111; color: #9f9; height: 140px; overflow-y: auto; padding: .4rem; border-radius: 6px; font: 12px monospace; white-space: pre-wrap; }
+    .hint { color: #666; font-size: .8rem; margin: .2rem 0 .4rem; }
+
+    /* Calibration / accuracy overlay */
+    #overlay { position: fixed; inset: 0; background: rgba(246,246,248,.97); z-index: 100001; display: none; }
+    #overlay.show { display: block; }
+    #overlayMsg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; max-width: 420px;
+                  background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 1rem 1.25rem; }
+    /* Calibration dots sit on their own layer ABOVE the webcam preview (which is fixed top-left
+       and would otherwise cover the top-left dot and swallow its clicks) */
+    #calLayer { position: fixed; inset: 0; z-index: 100003; pointer-events: none; display: none; }
+    #calLayer.show { display: block; }
+    .calPt { pointer-events: auto; }
+    .calPt { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; background: #ef4444;
+             border: 3px solid #fff; box-shadow: 0 0 0 2px #ef4444; cursor: pointer; }
+    .calPt.done { background: #22c55e; box-shadow: 0 0 0 2px #22c55e; cursor: default; }
+    #accTarget { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%;
+                 background: #2563eb; display: none; }
+
+    /* Keep WebGazer's webcam preview out of the way of the panel */
+    #webgazerVideoContainer { z-index: 100002 !important; }
+  </style>
+</head>
+<body>
+  <div id="grid"></div>
+
+  <aside id="panel">
+    <nav style="font-size:.85rem"><a href="index.html">Serial sender</a> · <b>WebGazer test</b></nav>
+    <h1>WebGazer.js testing ground</h1>
+    <div class="row">
+      <button id="start">Start</button>
+      <button class="secondary" id="pause" disabled>Pause</button>
+      <button class="secondary" id="stop" disabled>Stop</button>
+    </div>
+    <div>Status: <span id="status">idle</span></div>
+    <div class="mono">Gaze: <span id="xy">–</span> · <span id="rate">0</span> Hz</div>
+
+    <h2>Tracker options</h2>
+    <label class="check"><input type="checkbox" id="optVideo" checked /> Show webcam preview</label>
+    <label class="check"><input type="checkbox" id="optFace" checked /> Show face mesh overlay</label>
+    <label class="check"><input type="checkbox" id="optDot" checked /> Show prediction dot</label>
+    <label class="check"><input type="checkbox" id="optKalman" checked /> Kalman filter (smoothing)</label>
+    <label class="check"><input type="checkbox" id="optMouse" checked /> Learn from mouse clicks/moves</label>
+    <label class="check"><input type="checkbox" id="optSave" /> Keep calibration across reloads</label>
+    <div class="row">
+      Regression:
+      <select id="optReg">
+        <option value="ridge">ridge</option>
+        <option value="weightedRidge">weightedRidge</option>
+        <option value="threadedRidge">threadedRidge</option>
+      </select>
+    </div>
+    <p class="hint">Changing regression or "keep across reloads" applies on next Start.</p>
+
+    <h2>Calibration &amp; accuracy</h2>
+    <div class="row">
+      <button id="calibrate" disabled>Calibrate (9 points)</button>
+      <button class="secondary" id="measure" disabled>Measure accuracy</button>
+    </div>
+    <div class="row"><button class="secondary" id="clear" disabled>Clear training data</button></div>
+    <div id="accResult" class="mono"></div>
+
+    <h2>Dwell-selection grid</h2>
+    <div class="row">
+      Grid:
+      <select id="gridSize">
+        <option value="2">2 × 2</option>
+        <option value="3" selected>3 × 3</option>
+        <option value="4">4 × 4</option>
+      </select>
+      Dwell: <input type="range" id="dwell" min="300" max="3000" step="100" value="1000" style="width:90px" />
+      <span id="dwellVal" class="mono">1000 ms</span>
+    </div>
+
+    <h2>Recording</h2>
+    <div class="row">
+      <button class="secondary" id="record" disabled>Start recording</button>
+      <button class="secondary" id="download" disabled>Download CSV</button>
+    </div>
+    <div class="hint" id="recInfo">0 samples</div>
+
+    <h2>Log</h2>
+    <div id="log"></div>
+  </aside>
+
+  <div id="overlay">
+    <div id="overlayMsg"></div>
+    <div id="accTarget"></div>
+  </div>
+  <div id="calLayer"></div>
+
+  <script src="/vendor/webgazer/webgazer.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const wg = window.webgazer;
+
+    // Face-mesh model files are served locally by server.js
+    wg.params.faceMeshSolutionPath = '/vendor/webgazer/mediapipe/face_mesh';
+
+    let running = false, paused = false;
+    let last = null;                 // last gaze prediction {x, y}
+    let sampleTimes = [];            // for Hz readout
+    let accSamples = null;           // array while measuring accuracy
+    let recording = false, recorded = [];
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString();
+      $('log').textContent += `[${t}] ${msg}\n`;
+      $('log').scrollTop = $('log').scrollHeight;
+    }
+    function setStatus(s) { $('status').textContent = s; }
+    function setRunningUI() {
+      for (const id of ['pause', 'stop', 'calibrate', 'measure', 'clear', 'record']) $(id).disabled = !running;
+      $('start').disabled = running;
+      $('pause').textContent = paused ? 'Resume' : 'Pause';
+    }
+
+    // ---------- Gaze listener ----------
+    function onGaze(data, elapsed) {
+      const now = performance.now();
+      if (!data) { last = null; $('xy').textContent = 'no face'; return; }
+      last = { x: data.x, y: data.y };
+      $('xy').textContent = `${Math.round(data.x)}, ${Math.round(data.y)}`;
+      sampleTimes.push(now);
+      while (sampleTimes.length && now - sampleTimes[0] > 1000) sampleTimes.shift();
+      $('rate').textContent = sampleTimes.length;
+
+      if (accSamples) accSamples.push(last);
+      if (recording) {
+        recorded.push([Date.now(), Math.round(elapsed), data.x.toFixed(1), data.y.toFixed(1)]);
+        if (recorded.length % 30 === 0) $('recInfo').textContent = `${recorded.length} samples`;
+      }
+      updateDwell(data.x, data.y, now);
+    }
+
+    // ---------- Start / pause / stop ----------
+    $('start').onclick = async () => {
+      setStatus('starting… (allow camera access)');
+      $('start').disabled = true;
+      try {
+        wg.saveDataAcrossSessions($('optSave').checked);
+        wg.setRegression($('optReg').value);
+        wg.setGazeListener(onGaze);
+        await wg.begin();
+        running = true; paused = false;
+        applyOptions();
+        setStatus('running');
+        log(`Started (regression: ${$('optReg').value}). Calibrate before testing.`);
+      } catch (e) {
+        setStatus('error');
+        log(`Start failed: ${e?.message || e}`);
+        $('start').disabled = false;
+      }
+      setRunningUI();
+    };
+
+    $('pause').onclick = () => {
+      if (paused) { wg.resume(); paused = false; setStatus('running'); log('Resumed'); }
+      else { wg.pause(); paused = true; setStatus('paused'); log('Paused'); }
+      setRunningUI();
+    };
+
+    $('stop').onclick = () => {
+      wg.end();
+      running = false; paused = false; last = null;
+      setStatus('stopped'); $('xy').textContent = '–'; $('rate').textContent = '0';
+      log('Stopped (webcam released)');
+      setRunningUI();
+    };
+
+    // ---------- Options ----------
+    function applyOptions() {
+      if (!running) return;
+      wg.showVideoPreview($('optVideo').checked);
+      wg.showFaceOverlay($('optFace').checked);
+      wg.showFaceFeedbackBox($('optFace').checked);
+      wg.showPredictionPoints($('optDot').checked);
+      wg.applyKalmanFilter($('optKalman').checked);
+      if ($('optMouse').checked) wg.addMouseEventListeners(); else wg.removeMouseEventListeners();
+    }
+    for (const id of ['optVideo', 'optFace', 'optDot', 'optKalman', 'optMouse']) $(id).onchange = applyOptions;
+
+    $('clear').onclick = () => { wg.clearData(); log('Training data cleared'); };
+
+    // ---------- 9-point calibration ----------
+    // WebGazer learns from every click: clicking a point while looking at it adds a training sample.
+    const CLICKS_PER_POINT = 5;
+    $('calibrate').onclick = () => {
+      const ov = $('overlay'), layer = $('calLayer');
+      layer.innerHTML = '';
+      const closeCal = () => { ov.classList.remove('show'); layer.classList.remove('show'); };
+      $('overlayMsg').innerHTML = `<b>Calibration</b><br>Look at each red dot and click it ${CLICKS_PER_POINT} times
+        until it turns green. Keep your head still.<br><br><button class="secondary" id="calCancel">Cancel</button>`;
+      $('calCancel').onclick = closeCal;
+      $('accTarget').style.display = 'none';
+      if (!$('optMouse').checked) wg.addMouseEventListeners();   // clicks are needed for calibration
+
+      const pos = [10, 50, 90];
+      let remaining = 9;
+      for (const py of pos) for (const px of pos) {
+        const pt = document.createElement('div');
+        pt.className = 'calPt';
+        pt.style.left = px + '%'; pt.style.top = py + '%';
+        let clicks = 0;
+        pt.onclick = () => {
+          if (pt.classList.contains('done')) return;
+          clicks++;
+          pt.style.opacity = 0.3 + 0.7 * (1 - clicks / CLICKS_PER_POINT);
+          if (clicks >= CLICKS_PER_POINT) {
+            pt.classList.add('done'); pt.style.opacity = 1;
+            if (--remaining === 0) {
+              log('Calibration complete');
+              if (!$('optMouse').checked) wg.removeMouseEventListeners();
+              closeCal();
+            }
+          }
+        };
+        layer.appendChild(pt);
+      }
+      ov.classList.add('show');
+      layer.classList.add('show');
+    };
+
+    // ---------- Accuracy measurement ----------
+    // Stare at a centre dot for 5 s; report mean distance of predictions to the dot.
+    $('measure').onclick = () => {
+      const ov = $('overlay');
+      $('calLayer').innerHTML = '';
+      $('overlayMsg').innerHTML = 'Stare at the blue dot in the centre for 5 seconds. Don\'t move the mouse.';
+      $('overlayMsg').style.top = '30%';
+      $('accTarget').style.display = 'block';
+      ov.classList.add('show');
+      const hadMouse = $('optMouse').checked;
+      wg.removeMouseEventListeners();    // don't train on the mouse during the test
+
+      setTimeout(() => { accSamples = []; }, 500);   // short settle time
+      setTimeout(() => {
+        const samples = accSamples || [];
+        accSamples = null;
+        ov.classList.remove('show');
+        $('overlayMsg').style.top = '';
+        $('accTarget').style.display = 'none';
+        if (hadMouse) wg.addMouseEventListeners();
+
+        if (!samples.length) { $('accResult').textContent = 'No samples (face not detected?)'; return; }
+        const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+        const d = samples.map((s) => Math.hypot(s.x - cx, s.y - cy));
+        const mean = d.reduce((a, b) => a + b, 0) / d.length;
+        const sorted = [...d].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        // Same "precision %" measure as the official WebGazer calibration demo
+        const precision = Math.max(0, 100 - (mean / (window.innerHeight / 2)) * 100);
+        $('accResult').textContent =
+          `n=${d.length}  mean=${mean.toFixed(0)}px  median=${median.toFixed(0)}px  precision≈${precision.toFixed(0)}%`;
+        log(`Accuracy: mean ${mean.toFixed(0)}px, median ${median.toFixed(0)}px, ${precision.toFixed(0)}%`);
+      }, 5500);
+    };
+
+    // ---------- Dwell grid ----------
+    let tiles = [], gazedTile = null, dwellStart = 0;
+    function buildGrid() {
+      const n = Number($('gridSize').value);
+      const g = $('grid');
+      g.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+      g.style.gridTemplateRows = `repeat(${n}, 1fr)`;
+      g.innerHTML = '';
+      tiles = [];
+      for (let i = 1; i <= n * n; i++) {
+        const t = document.createElement('div');
+        t.className = 'tile';
+        t.innerHTML = `<div class="fill"></div><span>${i}</span>`;
+        t.dataset.label = i;
+        g.appendChild(t); tiles.push(t);
+      }
+      gazedTile = null;
+    }
+    function updateDwell(x, y, now) {
+      if ($('overlay').classList.contains('show')) return;
+      const hit = tiles.find((t) => {
+        const r = t.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      }) || null;
+      if (hit !== gazedTile) {
+        if (gazedTile) { gazedTile.classList.remove('gazed'); gazedTile.querySelector('.fill').style.height = '0'; }
+        gazedTile = hit; dwellStart = now;
+        if (hit) hit.classList.add('gazed');
+        return;
+      }
+      if (!hit) return;
+      const dwellMs = Number($('dwell').value);
+      const p = Math.min(1, (now - dwellStart) / dwellMs);
+      hit.querySelector('.fill').style.height = (p * 100) + '%';
+      if (p >= 1) {
+        hit.classList.add('selected');
+        setTimeout(() => hit.classList.remove('selected'), 300);
+        log(`Selected tile ${hit.dataset.label}`);
+        dwellStart = now;            // require a full new dwell to select again
+      }
+    }
+    $('gridSize').onchange = buildGrid;
+    $('dwell').oninput = () => { $('dwellVal').textContent = $('dwell').value + ' ms'; };
+    buildGrid();
+
+    // ---------- Recording ----------
+    $('record').onclick = () => {
+      recording = !recording;
+      if (recording) { recorded = []; log('Recording started'); }
+      else log(`Recording stopped (${recorded.length} samples)`);
+      $('record').textContent = recording ? 'Stop recording' : 'Start recording';
+      $('recInfo').textContent = `${recorded.length} samples`;
+      $('download').disabled = recording || !recorded.length;
+    };
+    $('download').onclick = () => {
+      const csv = 'timestamp_ms,elapsed_ms,x,y\n' + recorded.map((r) => r.join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = `gaze-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+
+    window.addEventListener('beforeunload', () => { if (running) wg.end(); });
+  </script>
+</body>
+</html>

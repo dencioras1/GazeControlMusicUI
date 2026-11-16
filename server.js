@@ -5,6 +5,8 @@ const HTTP_PORT = process.env.PORT || 3000;
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
+// WebGazer.js + its MediaPipe face-mesh assets, served locally (no CDN needed)
+app.use('/vendor/webgazer', express.static('node_modules/webgazer/dist'));
 
 let port = null;       // currently open SerialPort
 const log = [];        // recent lines received from the Arduino
