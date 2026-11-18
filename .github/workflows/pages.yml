@@ -1,0 +1,61 @@
+# Builds the static part of the project and publishes it to GitHub Pages.
+#
+# What gets deployed:
+#   public/                          -> site root (gaze interface, WebGazer test, assets)
+#   node_modules/webgazer/dist       -> vendor/webgazer (what server.js serves locally)
+#   index.html (repo root)           -> index.html (replaces the Serial sender, which needs server.js)
+#
+# One-time setup: repo Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # --ignore-scripts: only WebGazer's files are needed, so skip serialport's native build step
+      - run: npm ci --ignore-scripts
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/vendor/webgazer
+          cp -r public/. _site/
+          cp node_modules/webgazer/dist/webgazer.js _site/vendor/webgazer/
+          cp -r node_modules/webgazer/dist/mediapipe _site/vendor/webgazer/
+          cp index.html _site/index.html
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
