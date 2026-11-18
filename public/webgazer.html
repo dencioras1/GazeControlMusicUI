@@ -146,13 +146,13 @@
   <div id="calLayer"></div>
   <div id="areaCursor"></div>
 
-  <script src="/vendor/webgazer/webgazer.js"></script>
+  <script src="vendor/webgazer/webgazer.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const wg = window.webgazer;
 
-    // Face-mesh model files are served locally by server.js
-    wg.params.faceMeshSolutionPath = '/vendor/webgazer/mediapipe/face_mesh';
+    // Face-mesh model files: served by server.js locally, copied in by the GitHub Pages workflow
+    wg.params.faceMeshSolutionPath = 'vendor/webgazer/mediapipe/face_mesh';
 
     let running = false, paused = false;
     let last = null;                 // last gaze prediction {x, y}

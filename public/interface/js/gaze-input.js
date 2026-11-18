@@ -165,7 +165,7 @@ export class GazeInput {
   async useWebGazer() {
     this.stop();
     const wg = window.webgazer;
-    wg.params.faceMeshSolutionPath = '/vendor/webgazer/mediapipe/face_mesh';
+    wg.params.faceMeshSolutionPath = 'vendor/webgazer/mediapipe/face_mesh';
     wg.setRegression('ridge');
     wg.setGazeListener((data) => {
       // Gaze predictions are unreliable while the eyes are closed: skip them.
