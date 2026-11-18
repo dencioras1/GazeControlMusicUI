@@ -23,6 +23,10 @@
     .tile.gazed { border-color: #2563eb; color: #2563eb; }
     .tile.selected { background: #22c55e; color: #fff; transition: background .1s; }
 
+    /* Area cursor: circle around the gaze point (area mode only) */
+    #areaCursor { position: fixed; left: 0; top: 0; border-radius: 50%; pointer-events: none; z-index: 99999; display: none;
+                  background: rgba(37, 99, 235, .12); border: 2px solid rgba(37, 99, 235, .6); }
+
     /* Side panel */
     #panel { position: fixed; top: 0; right: 0; width: 340px; height: 100%; overflow-y: auto; background: #fff; border-left: 1px solid #ddd;
              padding: .75rem 1rem; z-index: 100000; font-size: .9rem; }
@@ -59,7 +63,7 @@
   <div id="grid"></div>
 
   <aside id="panel">
-    <nav style="font-size:.85rem"><a href="index.html">Serial sender</a> · <b>WebGazer test</b></nav>
+    <nav style="font-size:.85rem"><a href="index.html">Serial sender</a> · <b>WebGazer test</b> · <a href="interface.html">Gaze interface</a></nav>
     <h1>WebGazer.js testing ground</h1>
     <div class="row">
       <button id="start">Start</button>
@@ -105,6 +109,24 @@
       Dwell: <input type="range" id="dwell" min="300" max="3000" step="100" value="1000" style="width:90px" />
       <span id="dwellVal" class="mono">1000 ms</span>
     </div>
+    <div class="row">
+      Cursor:
+      <select id="cursorMode">
+        <option value="point">point (dot must be inside tile)</option>
+        <option value="area" selected>area (circle overlap)</option>
+      </select>
+    </div>
+    <div class="row">
+      Radius: <input type="range" id="radius" min="20" max="300" step="5" value="100" style="width:110px" />
+      <span id="radiusVal" class="mono">100 px</span>
+    </div>
+    <div class="row">
+      Min overlap: <input type="range" id="minShare" min="10" max="80" step="5" value="30" style="width:90px" />
+      <span id="minShareVal" class="mono">30 %</span>
+    </div>
+    <div class="row"><button class="secondary" id="useAcc" disabled>Radius = measured median error</button></div>
+    <p class="hint">Area mode: the tile covering the largest share of the circle (at least "min overlap") fills up.
+      Looking away briefly drains progress slowly instead of resetting it.</p>
 
     <h2>Recording</h2>
     <div class="row">
@@ -122,6 +144,7 @@
     <div id="accTarget"></div>
   </div>
   <div id="calLayer"></div>
+  <div id="areaCursor"></div>
 
   <script src="/vendor/webgazer/webgazer.js"></script>
   <script>
@@ -152,7 +175,7 @@
     // ---------- Gaze listener ----------
     function onGaze(data, elapsed) {
       const now = performance.now();
-      if (!data) { last = null; $('xy').textContent = 'no face'; return; }
+      if (!data) { last = null; $('xy').textContent = 'no face'; $('areaCursor').style.display = 'none'; return; }
       last = { x: data.x, y: data.y };
       $('xy').textContent = `${Math.round(data.x)}, ${Math.round(data.y)}`;
       sampleTimes.push(now);
@@ -160,11 +183,14 @@
       $('rate').textContent = sampleTimes.length;
 
       if (accSamples) accSamples.push(last);
+      updateDwell(data.x, data.y, now);
       if (recording) {
-        recorded.push([Date.now(), Math.round(elapsed), data.x.toFixed(1), data.y.toFixed(1)]);
+        const area = $('cursorMode').value === 'area';
+        recorded.push([Date.now(), Math.round(elapsed), data.x.toFixed(1), data.y.toFixed(1),
+                       $('cursorMode').value, area ? $('radius').value : '',
+                       gazedTile ? gazedTile.dataset.label : '', selectedNow || '']);
         if (recorded.length % 30 === 0) $('recInfo').textContent = `${recorded.length} samples`;
       }
-      updateDwell(data.x, data.y, now);
     }
 
     // ---------- Start / pause / stop ----------
@@ -190,13 +216,14 @@
 
     $('pause').onclick = () => {
       if (paused) { wg.resume(); paused = false; setStatus('running'); log('Resumed'); }
-      else { wg.pause(); paused = true; setStatus('paused'); log('Paused'); }
+      else { wg.pause(); paused = true; setStatus('paused'); log('Paused'); $('areaCursor').style.display = 'none'; }
       setRunningUI();
     };
 
     $('stop').onclick = () => {
       wg.end();
       running = false; paused = false; last = null;
+      $('areaCursor').style.display = 'none'; resetDwell();
       setStatus('stopped'); $('xy').textContent = '–'; $('rate').textContent = '0';
       log('Stopped (webcam released)');
       setRunningUI();
@@ -284,6 +311,9 @@
         const median = sorted[Math.floor(sorted.length / 2)];
         // Same "precision %" measure as the official WebGazer calibration demo
         const precision = Math.max(0, 100 - (mean / (window.innerHeight / 2)) * 100);
+        measuredMedian = median;
+        $('useAcc').disabled = false;
+        $('useAcc').textContent = `Radius = measured median error (${median.toFixed(0)} px)`;
         $('accResult').textContent =
           `n=${d.length}  mean=${mean.toFixed(0)}px  median=${median.toFixed(0)}px  precision≈${precision.toFixed(0)}%`;
         log(`Accuracy: mean ${mean.toFixed(0)}px, median ${median.toFixed(0)}px, ${precision.toFixed(0)}%`);
@@ -292,6 +322,42 @@
 
     // ---------- Dwell grid ----------
     let tiles = [], gazedTile = null, dwellStart = 0;
+    let progress = [];               // area mode: dwell progress 0..1 per tile
+    let lastDwellNow = 0;            // area mode: time of previous update
+    let selectedNow = null;          // label of the tile selected on this sample (for recording)
+    let measuredMedian = null;       // median error from the last accuracy measurement (px)
+
+    // Area mode: progress drains at this fraction of the fill speed while a
+    // tile is not the candidate, so a short glance away doesn't reset it.
+    const DECAY_FACTOR = 0.5;
+    // Gaps between updates longer than this (pause, no face) don't count as dwell.
+    const MAX_DT_MS = 200;
+
+    // Fixed sample points spread evenly over a unit disk (sunflower pattern).
+    // Scaled by the radius, they estimate how much of the circle covers each tile.
+    const DISK = (() => {
+      const n = 150, golden = Math.PI * (3 - Math.sqrt(5)), pts = [];
+      for (let i = 0; i < n; i++) {
+        const r = Math.sqrt((i + 0.5) / n), a = i * golden;
+        pts.push([r * Math.cos(a), r * Math.sin(a)]);
+      }
+      return pts;
+    })();
+
+    function resetDwell() {
+      for (const t of tiles) { t.classList.remove('gazed'); t.querySelector('.fill').style.height = '0'; }
+      gazedTile = null;
+      progress = tiles.map(() => 0);
+      lastDwellNow = 0;
+    }
+
+    function selectTile(tile) {
+      tile.classList.add('selected');
+      setTimeout(() => tile.classList.remove('selected'), 300);
+      log(`Selected tile ${tile.dataset.label}`);
+      selectedNow = tile.dataset.label;
+    }
+
     function buildGrid() {
       const n = Number($('gridSize').value);
       const g = $('grid');
@@ -306,10 +372,63 @@
         t.dataset.label = i;
         g.appendChild(t); tiles.push(t);
       }
-      gazedTile = null;
+      resetDwell();
     }
+
     function updateDwell(x, y, now) {
-      if ($('overlay').classList.contains('show')) return;
+      selectedNow = null;
+      const cursor = $('areaCursor');
+      if ($('overlay').classList.contains('show')) { cursor.style.display = 'none'; return; }
+      if ($('cursorMode').value === 'area') updateDwellArea(x, y, now, cursor);
+      else { cursor.style.display = 'none'; updateDwellPoint(x, y, now); }
+    }
+
+    // Area cursor: the tile covering the largest share of the circle around the
+    // gaze point is the candidate, if that share is at least "min overlap".
+    function updateDwellArea(x, y, now, cursor) {
+      const radius = Number($('radius').value);
+      cursor.style.display = 'block';
+      cursor.style.width = cursor.style.height = (2 * radius) + 'px';
+      cursor.style.transform = `translate(${x - radius}px, ${y - radius}px)`;
+
+      // Share of the circle on each tile
+      const rects = tiles.map((t) => t.getBoundingClientRect());
+      const counts = tiles.map(() => 0);
+      for (const [dx, dy] of DISK) {
+        const px = x + dx * radius, py = y + dy * radius;
+        const i = rects.findIndex((r) => px >= r.left && px <= r.right && py >= r.top && py <= r.bottom);
+        if (i >= 0) counts[i]++;
+      }
+      let best = -1;
+      counts.forEach((c, i) => { if (best < 0 || c > counts[best]) best = i; });
+      const minShare = Number($('minShare').value) / 100;
+      const candidate = (best >= 0 && counts[best] / DISK.length >= minShare) ? best : -1;
+
+      // Advance / drain progress
+      const dt = lastDwellNow ? Math.min(now - lastDwellNow, MAX_DT_MS) : 0;
+      lastDwellNow = now;
+      const step = dt / Number($('dwell').value);
+      tiles.forEach((t, i) => {
+        progress[i] = i === candidate ? progress[i] + step : Math.max(0, progress[i] - step * DECAY_FACTOR);
+      });
+
+      const newGazed = candidate >= 0 ? tiles[candidate] : null;
+      if (newGazed !== gazedTile) {
+        if (gazedTile) gazedTile.classList.remove('gazed');
+        if (newGazed) newGazed.classList.add('gazed');
+        gazedTile = newGazed;
+      }
+
+      if (candidate >= 0 && progress[candidate] >= 1) {
+        selectTile(tiles[candidate]);
+        progress = tiles.map(() => 0);   // require a full new dwell to select again
+      }
+      tiles.forEach((t, i) => { t.querySelector('.fill').style.height = (Math.min(1, progress[i]) * 100) + '%'; });
+    }
+
+    // Point cursor (original behaviour): the gaze point must be inside the tile,
+    // and leaving it for a single sample restarts the dwell.
+    function updateDwellPoint(x, y, now) {
       const hit = tiles.find((t) => {
         const r = t.getBoundingClientRect();
         return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
@@ -325,14 +444,22 @@
       const p = Math.min(1, (now - dwellStart) / dwellMs);
       hit.querySelector('.fill').style.height = (p * 100) + '%';
       if (p >= 1) {
-        hit.classList.add('selected');
-        setTimeout(() => hit.classList.remove('selected'), 300);
-        log(`Selected tile ${hit.dataset.label}`);
+        selectTile(hit);
         dwellStart = now;            // require a full new dwell to select again
       }
     }
     $('gridSize').onchange = buildGrid;
     $('dwell').oninput = () => { $('dwellVal').textContent = $('dwell').value + ' ms'; };
+    $('cursorMode').onchange = () => { resetDwell(); log(`Cursor mode: ${$('cursorMode').value}`); };
+    $('radius').oninput = () => { $('radiusVal').textContent = $('radius').value + ' px'; };
+    $('minShare').oninput = () => { $('minShareVal').textContent = $('minShare').value + ' %'; };
+    $('useAcc').onclick = () => {
+      if (measuredMedian == null) return;
+      const r = $('radius');
+      r.value = Math.min(Number(r.max), Math.max(Number(r.min), Math.round(measuredMedian / 5) * 5));
+      r.oninput();
+      log(`Radius set to ${r.value} px (measured median error ${measuredMedian.toFixed(0)} px)`);
+    };
     buildGrid();
 
     // ---------- Recording ----------
@@ -345,7 +472,7 @@
       $('download').disabled = recording || !recorded.length;
     };
     $('download').onclick = () => {
-      const csv = 'timestamp_ms,elapsed_ms,x,y\n' + recorded.map((r) => r.join(',')).join('\n');
+      const csv = 'timestamp_ms,elapsed_ms,x,y,cursor_mode,radius_px,gazed_tile,selected_tile\n' + recorded.map((r) => r.join(',')).join('\n');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
       a.download = `gaze-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;

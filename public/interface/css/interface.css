@@ -1,0 +1,150 @@
+/*
+ * interface.css — styling of the gaze interface.
+ *
+ * Colours: dark background with light details to limit eye strain during
+ * long use. All colours are defined once here; change them in this block only.
+ */
+:root {
+  --bg: #121418;          /* page background */
+  --surface: #1c2027;     /* pies, buttons */
+  --surface-2: #283040;   /* surface while armed (dwell complete) */
+  --line: #3a414d;        /* borders, outlines */
+  --text: #e6e8eb;        /* main text */
+  --muted: #9aa3ad;       /* secondary text */
+  --accent: #9cc4ff;      /* gaze focus, selection */
+  --note: #a8dca0;        /* a programmed note */
+  --play: #ffd88a;        /* something playing right now */
+
+  --gap: 16px;
+  --devbar-h: 36px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ----- Developer toolbar ----- */
+#devbar {
+  height: var(--devbar-h);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  background: #0d0f12;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap; overflow: hidden;
+}
+#devbar a { color: var(--accent); }
+#devbar b { color: var(--text); }
+#devbar .sep { width: 12px; }
+#devbar button {
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer;
+}
+#devbar button:disabled { opacity: .45; cursor: default; }
+#devStatus { overflow: hidden; text-overflow: ellipsis; }
+
+/* ----- Layout: pies on the left, buttons on the right ----- */
+#stage {
+  position: absolute; inset: var(--devbar-h) 0 0 0;
+  display: grid;
+  grid-template-columns: 1fr minmax(150px, 15vw);
+  gap: var(--gap); padding: var(--gap);
+}
+#pies { display: flex; gap: var(--gap); min-width: 0; min-height: 0; }
+.pie { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pie-title { text-align: center; color: var(--muted); font-size: 1.1rem; padding-bottom: 4px; }
+.pie-host { flex: 1; min-height: 0; display: flex; }
+.pie-svg { width: 100%; height: 100%; }
+
+#controls { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
+
+/* ----- Gaze buttons ----- */
+.gbtn {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  background: var(--surface);
+  border: 2px solid var(--line); border-radius: 16px;
+  font-size: clamp(1rem, 1.8vw, 1.6rem);
+  transition: background .15s, border-color .15s;
+}
+.gbtn small { color: var(--muted); font-size: .65em; }
+.gbtn.active { border-color: var(--play); color: var(--play); }
+
+/* ----- Pie segments and hub (SVG) ----- */
+.seg path { fill: var(--surface); stroke: var(--line); stroke-width: 1; transition: fill .12s; }
+.seg-label { fill: var(--text); font-size: 15px; text-anchor: middle; dominant-baseline: central; }
+.seg.has-notes .seg-label { fill: var(--note); font-weight: 700; }
+.seg.selected path { fill: #26324a; stroke: var(--accent); stroke-width: 2; }
+.seg.note path { fill: var(--note); }
+.seg.note .seg-label { fill: var(--bg); }
+.seg.playing path { fill: var(--play); }
+.seg.playing .seg-label { fill: var(--bg); }
+.seg.playhead path { stroke: var(--play); stroke-width: 3; }
+
+.hub circle { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.hub text { fill: var(--text); text-anchor: middle; dominant-baseline: central; }
+.hub-main { font-size: 11px; font-weight: 600; }
+.hub-sub { font-size: 6.5px; fill: var(--muted) !important; }
+
+/* ----- Gaze feedback (classes set by gaze-targets.js) ----- */
+.gbtn.gaze-focus, .seg.gaze-focus path, .hub.gaze-focus circle, .knob.gaze-focus circle {
+  stroke: var(--accent); border-color: var(--accent);
+}
+.seg.gaze-focus path { stroke-width: 2.5; }
+.gbtn.gaze-armed { background: var(--surface-2); }
+.seg.gaze-armed:not(.note):not(.playing) path, .hub.gaze-armed circle, .knob.gaze-armed circle { fill: var(--surface-2); }
+.seg.gaze-armed path, .hub.gaze-armed circle { stroke-width: 3.5; }
+.gaze-activated { filter: brightness(1.6); }
+
+/* Area cursor. --dwell (0-1) is the dwell progress of the focused target. */
+#gazeCursor {
+  position: fixed; left: 0; top: 0; z-index: 50;
+  display: none; pointer-events: none;
+  border-radius: 50%;
+  border: 2px solid rgba(156, 196, 255, .55);
+  background: rgba(156, 196, 255, calc(.05 + var(--dwell, 0) * .2));
+}
+#gazeCursor.armed { border: 3px solid var(--accent); }
+#gazeCursor.eyes-closed { border-style: dashed; }
+
+/* ----- Settings dialog with a pursuit slider ----- */
+#modal {
+  position: fixed; inset: var(--devbar-h) 0 0 0; z-index: 20;
+  display: none;
+  grid-template-columns: 1fr minmax(150px, 15vw);
+  gap: var(--gap); padding: var(--gap);
+  background: var(--bg);
+}
+#modal.show { display: grid; }
+.slider-host { display: flex; min-height: 0; }
+.slider-host[hidden] { display: none; }
+.pursuit-svg { width: 100%; height: 100%; }
+.dial { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.pursuit-value { fill: var(--text); font-size: 22px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+.pursuit-label { fill: var(--muted); font-size: 8px; text-anchor: middle; dominant-baseline: central; }
+.knob circle { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.knob-label { fill: var(--text); font-size: 18px; text-anchor: middle; dominant-baseline: central; }
+.knob.following circle { fill: var(--surface-2); stroke: var(--play); stroke-width: 2.5; }
+
+/* ----- Calibration (calibration.js) ----- */
+/* Above the camera preview, which would otherwise cover the top-left dot */
+.calibration { position: fixed; inset: 0; z-index: 102; background: var(--bg); }
+.calibration-msg {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -150%);
+  max-width: 420px; margin: 0; text-align: center; color: var(--muted);
+}
+.calibration-dot {
+  position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+  border-radius: 50%; background: #ff9b9b; border: 3px solid var(--bg);
+  box-shadow: 0 0 0 2px #ff9b9b; cursor: pointer;
+}
+.calibration-dot.done { background: var(--note); box-shadow: 0 0 0 2px var(--note); cursor: default; }
+
+/* WebGazer's camera preview: keep it above the interface */
+#webgazerVideoContainer { z-index: 101 !important; }

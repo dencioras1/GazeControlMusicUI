@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gaze Sequencer</title>
+  <!--
+    Gaze-controlled sequencer interface.
+    Structure:  interface/css/interface.css   all styling and colours
+                interface/js/app.js           builds the page (start reading here)
+                interface/js/*.js             one file per component
+  -->
+  <link rel="stylesheet" href="interface/css/interface.css" />
+</head>
+<body>
+  <!-- Developer toolbar: mouse-operated, for the experimenter. Not a gaze target. -->
+  <header id="devbar">
+    <nav><a href="index.html">Serial sender</a> · <a href="webgazer.html">WebGazer test</a> · <b>Gaze interface</b></nav>
+    <span class="sep"></span>
+    <button id="devMouse">Use mouse</button>
+    <button id="devEye">Use eye tracker</button>
+    <button id="devCalibrate">Calibrate</button>
+    <label><input type="checkbox" id="devCamera" /> camera preview</label>
+    <span id="devStatus"></span>
+  </header>
+
+  <!-- Gaze area: everything in here is controlled by gaze and blinks -->
+  <main id="stage">
+    <section id="pies">
+      <div class="pie">
+        <div class="pie-title">Tappers</div>
+        <div class="pie-host" id="tapperPie"></div>
+      </div>
+      <div class="pie">
+        <div class="pie-title" id="beatPieTitle">Beats</div>
+        <div class="pie-host" id="beatPie"></div>
+      </div>
+    </section>
+
+    <section id="controls">
+      <div class="gbtn" id="btnPlay">▶ Play</div>
+      <div class="gbtn" id="btnPause">❚❚ Pause</div>
+      <div class="gbtn" id="btnStop">■ Stop</div>
+      <div class="gbtn" id="btnDwell">Dwell<small id="dwellValue"></small></div>
+      <div class="gbtn" id="btnCursor">Cursor<small id="cursorValue"></small></div>
+    </section>
+  </main>
+
+  <!-- Settings dialog: shows one pursuit slider at a time -->
+  <div id="modal">
+    <div class="slider-host" id="sliderDwell"></div>
+    <div class="slider-host" id="sliderCursor"></div>
+    <div class="gbtn" id="btnDone">Done</div>
+  </div>
+
+  <!-- Area cursor: circle around the gaze point, fills while dwelling -->
+  <div id="gazeCursor"></div>
+
+  <script src="/vendor/webgazer/webgazer.js"></script>
+  <script type="module" src="interface/js/app.js"></script>
+</body>
+</html>
